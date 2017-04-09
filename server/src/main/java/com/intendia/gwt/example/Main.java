@@ -27,8 +27,8 @@ public class Main {
 
     public static void main(String[] args) throws Exception {
         ReplaySubject<String> broadcasterIn = ReplaySubject.create(1024);
-        Observable<Pair> broadcasterOut = broadcasterIn.map(Pair::new);
-        broadcasterOut.subscribe(System.out::println);
+        Observable<Pair> broadcasterOut = broadcasterIn.map(Pair::next);
+        broadcasterOut.subscribe(n -> L.info("broadcast " + n));
 
         HttpServer httpServer = HttpServer.create(new InetSocketAddress(8000), 0 /*default*/);
         httpServer.setExecutor(null /*default*/);
@@ -53,24 +53,26 @@ public class Main {
                 L.info("subscribing " + exchange.getRemoteAddress());
                 @Nullable String firstOpt = exchange.getRequestHeaders().getFirst("Last-Event-ID");
                 int first = Integer.parseInt(firstOpt == null ? "0" : firstOpt);
-                broadcasterOut.filter(n -> n.seq > first).subscribe(new Subscriber<Pair>() {
-                    public void onCompleted() {
-                        try { out.close(); } catch (IOException ignore) { }
-                    }
-                    public void onError(Throwable e) {
-                        try { out.close(); } catch (IOException ignore) { }
-                    }
-                    public void onNext(Pair n) {
-                        try {
-                            L.info("sending data to " + exchange.getRemoteAddress());
-                            out.write(("id: " + n.seq + "\n").getBytes());
-                            for (String row : n.msg.split("\n")) out.write(("data: " + row + "\n").getBytes());
-                            out.write(("\n").getBytes()); out.flush();
-                        } catch (IOException e) {
-                            L.log(SEVERE, "error sending data to " + exchange.getRemoteAddress() + ": " + e, e);
-                        }
-                    }
-                });
+                broadcasterOut.filter(n -> n.seq > first)
+                        .startWith(new Pair(0, "\"subscription success\""))
+                        .subscribe(new Subscriber<Pair>() {
+                            public void onCompleted() {
+                                try { out.close(); } catch (IOException ignore) { }
+                            }
+                            public void onError(Throwable e) {
+                                try { out.close(); } catch (IOException ignore) { }
+                            }
+                            public void onNext(Pair n) {
+                                try {
+                                    L.info("sending data to " + exchange.getRemoteAddress());
+                                    if (n.seq > 0) out.write(("id: " + n.seq + "\n").getBytes());
+                                    for (String row : n.msg.split("\n")) out.write(("data: " + row + "\n").getBytes());
+                                    out.write(("\n").getBytes()); out.flush();
+                                } catch (IOException e) {
+                                    L.log(SEVERE, "error sending data to " + exchange.getRemoteAddress() + ": " + e, e);
+                                }
+                            }
+                        });
             } catch (Throwable e) {
                 L.log(SEVERE, "error subscribing " + exchange.getRemoteAddress(), e);
             }
@@ -79,16 +81,12 @@ public class Main {
     }
 
     static class Pair {
+        static Pair next(String msg) { return new Pair(SEQ.getAndIncrement(), msg); }
         static AtomicInteger SEQ = new AtomicInteger((int) (Math.random() * 9999.));
         final int seq;
         final String msg;
-        Pair(String msg) {
-            this.seq = SEQ.getAndIncrement();
-            this.msg = msg;
-        }
-        @Override public String toString() {
-            return "Pair{seq=" + seq + ", msg='" + msg + '\'' + '}';
-        }
+        private Pair(int seq, String msg) { this.seq = seq; this.msg = msg; }
+        @Override public String toString() { return "Pair{seq=" + seq + ", msg=" + msg + '}'; }
     }
 
     private static boolean CORS(HttpExchange httpExchange) throws IOException {
