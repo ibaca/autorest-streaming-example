@@ -22,7 +22,7 @@ import rx.Observable;
 import rx.Subscriber;
 import rx.subjects.ReplaySubject;
 
-public class Main {
+public class Sun {
     static final Logger L = Logger.getLogger("server");
 
     public static void main(String[] args) throws Exception {
