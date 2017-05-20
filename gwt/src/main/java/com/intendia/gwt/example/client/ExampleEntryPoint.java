@@ -1,56 +1,49 @@
 package com.intendia.gwt.example.client;
 
+import static com.intendia.rxgwt.elemental2.RxElemental2.submit;
+import static elemental2.dom.DomGlobal.document;
+
 import com.google.gwt.core.client.EntryPoint;
-import com.google.gwt.core.client.GWT;
-import com.google.gwt.user.client.ui.FlowPanel;
-import com.google.gwt.user.client.ui.FormPanel;
-import com.google.gwt.user.client.ui.Label;
-import com.google.gwt.user.client.ui.RootPanel;
-import com.google.gwt.user.client.ui.TextBox;
-import com.intendia.rxgwt.client.RxEvents;
+import com.intendia.rxgwt.elemental2.RxElemental2;
+import elemental2.dom.Element;
+import elemental2.dom.HTMLFormElement;
+import elemental2.dom.HTMLInputElement;
+import jsinterop.base.Js;
 import rx.Observable;
-import rx.plugins.RxJavaErrorHandler;
-import rx.plugins.RxJavaPlugins;
 
 public class ExampleEntryPoint implements EntryPoint {
 
     public void onModuleLoad() {
-        RxJavaPlugins.getInstance().registerErrorHandler(new RxJavaErrorHandler() {
-            @Override public void handleError(Throwable e) {
-                GWT.getUncaughtExceptionHandler().onUncaughtException(e);
-            }
-        });
         Broadcaster broadcaster = new Broadcaster_RestServiceModel(() -> new XhrResourceBuilder()
                 .path("http://localhost:8000/"));
 
-        FlowPanel history = new FlowPanel(); RootPanel.get().add(history);
+        Element history = document.createElement("pre"); document.body.appendChild(history);
 
-        FormPanel form = new FormPanel(); RootPanel.get().add(form);
-        form.setAction("#");
+        HTMLFormElement form = Js.cast(document.createElement("form")); document.body.appendChild(form);
 
-        TextBox sent = new TextBox(); form.add(sent);
-        sent.getElement().setAttribute("required", "");
+        HTMLInputElement sent = Js.cast(document.createElement("input")); form.appendChild(sent);
+        sent.type = "text"; sent.required = true;
 
-        Label console = new Label(); RootPanel.get().add(console);
+        Element console = document.createElement("div"); document.body.appendChild(console);
 
         broadcaster.listen()
-                .doOnNext(msg -> history.add(new Label(msg)))
+                .doOnNext(msg -> history.textContent += msg + "\n")
                 .subscribe();
 
-        RxEvents.submit(form)
+        RxElemental2.fromEvent(form, submit)
                 .switchMap(e -> {
-                    console.setText("Sending…");
-                    return broadcaster.sent(sent.getText())
+                    e.preventDefault();
+                    console.textContent = "Sending…";
+                    return broadcaster.sent(sent.value)
                             .doOnCompleted(() -> {
-                                sent.setValue("");
-                                console.setText("Success!");
+                                sent.value = "";
+                                console.textContent = "Success!";
                             })
                             .onErrorResumeNext(err -> {
-                                console.setText("Error: " + err);
+                                console.textContent = "Error: " + err;
                                 return Observable.empty();
                             });
                 })
                 .subscribe();
     }
-
 }

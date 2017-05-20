@@ -1,8 +1,9 @@
 package com.intendia.gwt.example.client;
 
 import static com.intendia.gwt.autorest.client.CollectorResourceVisitor.Param.expand;
-import static elemental.client.Browser.encodeURI;
-import static elemental.client.Browser.encodeURIComponent;
+import static elemental2.core.Global.JSON;
+import static elemental2.core.Global.encodeURI;
+import static elemental2.core.Global.encodeURIComponent;
 import static java.util.Arrays.asList;
 import static java.util.Arrays.stream;
 import static java.util.Collections.emptyList;
@@ -13,20 +14,22 @@ import static javax.ws.rs.core.MediaType.APPLICATION_JSON;
 import static javax.ws.rs.core.MediaType.MULTIPART_FORM_DATA;
 
 import com.intendia.gwt.autorest.client.CollectorResourceVisitor;
-import elemental.client.Browser;
-import elemental.events.MessageEvent;
-import elemental.html.EventSource;
-import elemental.html.FormData;
-import elemental.js.html.JsFormData;
-import elemental.xml.XMLHttpRequest;
+import elemental2.dom.EventListener;
+import elemental2.dom.EventSource;
+import elemental2.dom.FormData;
+import elemental2.dom.MessageEvent;
+import elemental2.dom.MessagePort;
+import elemental2.dom.XMLHttpRequest;
 import java.util.Objects;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Stream;
-import jsinterop.annotations.JsMethod;
+import jsinterop.annotations.JsFunction;
+import jsinterop.base.Js;
 import rx.Observable;
 import rx.Single;
 import rx.Subscriber;
+import rx.Subscription;
 import rx.annotations.Experimental;
 import rx.internal.producers.QueuedProducer;
 import rx.internal.producers.SingleDelayedProducer;
@@ -86,9 +89,8 @@ public class XhrResourceBuilder extends CollectorResourceVisitor {
     }
 
     private <T> void xmlHttpRequestSubscription(Subscriber<T> s) {
-        final XMLHttpRequest xhr;
+        final XMLHttpRequest xhr = new XMLHttpRequest();
         final String uri = uri();
-        xhr = Browser.getWindow().newXMLHttpRequest();
         xhr.open(method, uri);
         xhr.setRequestHeader(ACCEPT, stream(produces).collect(joining(", ")));
         xhr.setRequestHeader(CONTENT_TYPE, stream(consumes).collect(joining(", ")));
@@ -96,15 +98,15 @@ public class XhrResourceBuilder extends CollectorResourceVisitor {
 
         SingleDelayedProducer<T> producer = new SingleDelayedProducer<>(s);
         try {
-            xhr.setOnreadystatechange(evt -> {
+            xhr.onreadystatechange = Js.cast((Fn) () -> {
                 if (s.isUnsubscribed()) return;
-                if (xhr.getReadyState() == XMLHttpRequest.DONE) {
-                    if (!isExpected(xhr.getStatus(), uri)) {
+                if (xhr.readyState == XMLHttpRequest.DONE) {
+                    if (!isExpected((int) xhr.status, uri)) {
                         s.onError(new FailedStatusCodeException(xhr));
                     } else {
                         try {
                             log.fine("Received http response for request: " + uri);
-                            String text = xhr.getResponseText();
+                            String text = xhr.responseText;
                             if (text == null || text.isEmpty()) {
                                 producer.setValue(null);
                             } else {
@@ -125,8 +127,8 @@ public class XhrResourceBuilder extends CollectorResourceVisitor {
                 xhr.send(stringify(data));
             } else if (!formParams.isEmpty()) {
                 xhr.setRequestHeader(CONTENT_TYPE, MULTIPART_FORM_DATA);
-                FormData form = createFormData();
-                formParams.forEach(p -> append(form, p.k, p.v));
+                FormData form = new FormData();
+                formParams.forEach(p -> form.append(p.k, stringify(p.v)));
                 xhr.send(form);
             } else {
                 xhr.send();
@@ -138,28 +140,35 @@ public class XhrResourceBuilder extends CollectorResourceVisitor {
     }
 
     private <T> void eventSourceSubscription(Subscriber<T> s) {
-        final EventSource source = Browser.getWindow().newEventSource(uri());
-        final QueuedProducer<T> producer = new QueuedProducer<T>(s);
+        final EventSource source = new EventSource(uri());
+        final QueuedProducer<T> producer = new QueuedProducer<>(s);
         try {
-            s.add(Subscriptions.create(source.addEventListener("message", evt -> {
-                MessageEvent msg = (MessageEvent) evt;
-                producer.onNext(parse((String) msg.getData()));
-            }, false)::remove));
-            s.add(Subscriptions.create(source.addEventListener("open", evt -> {
+            s.add(subscribeEventListener(source, "message", evt -> {
+                producer.onNext(parse(Js.<MessageEvent<String>>cast(evt).data));
+            }));
+            s.add(subscribeEventListener(source, "open", evt -> {
                 log.fine("Connection opened: " + uri());
-            }, false)::remove));
-            s.add(Subscriptions.create(source.addEventListener("error", evt -> {
+            }));
+            s.add(subscribeEventListener(source, "error", evt -> {
                 log.log(Level.SEVERE, "Error: " + evt);
-                if (source.getReadyState() == EventSource.CLOSED) {
+                if (source.readyState == source.CLOSED) {
                     producer.onError(new RuntimeException("Event source error"));
                 }
-            }, false)::remove));
+            }));
             s.setProducer(producer);
-            s.add(Subscriptions.create(source::close));
+            s.add(Subscriptions.create(() -> {
+                // hack because elemental API EventSource.close is missing
+                Js.<MessagePort>uncheckedCast(source).close();
+            }));
         } catch (Throwable e) {
             log.log(Level.FINE, "Received http error for: " + uri(), e);
             s.onError(new RuntimeException("Event source error", e));
         }
+    }
+
+    public static Subscription subscribeEventListener(EventSource source, String type, EventListener fn) {
+        source.addEventListener(type, fn);
+        return Subscriptions.create(() -> source.removeEventListener(type, fn));
     }
 
     public static class RequestResponseException extends RuntimeException {
@@ -174,23 +183,18 @@ public class XhrResourceBuilder extends CollectorResourceVisitor {
     }
 
     public static class FailedStatusCodeException extends RequestResponseException {
-        public FailedStatusCodeException(XMLHttpRequest xhr) { super(xhr, xhr.getStatusText()); }
-        public int getStatusCode() { return xhr.getStatus(); }
+        public FailedStatusCodeException(XMLHttpRequest xhr) { super(xhr, xhr.statusText); }
+        public int getStatusCode() { return (int) xhr.status; }
     }
 
-    @JsMethod(namespace = "JSON")
-    private static native <T> T parse(String text);
+    private static <T> T parse(String text) {return Js.cast(JSON.parse(text)); }
 
-    @JsMethod(namespace = "JSON")
-    private static native String stringify(Object value);
+    private static String stringify(Object value) { return JSON.stringify(value); }
 
-    private static native JsFormData createFormData()/*-{
-        return new $wnd.FormData();
-    }-*/;
-
-    public static native void append(FormData formData, String name, Object value)/*-{
-        formData.append(name, value);
-    }-*/;
+    @JsFunction
+    public interface Fn {
+        void onInvoke();
+    }
 
     private static String encode(String decodedURLComponent) {
         return encodeURIComponent(decodedURLComponent).replaceAll("%20", "+");
