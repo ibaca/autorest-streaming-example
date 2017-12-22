@@ -1,5 +1,7 @@
 package com.intendia.gwt.example;
 
+import static java.nio.charset.Charset.defaultCharset;
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.logging.Level.SEVERE;
 import static javax.servlet.http.HttpServletResponse.SC_OK;
 
@@ -22,6 +24,7 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.servlet.ServletHandler;
+import org.eclipse.jetty.servlet.ServletHolder;
 import rx.Observable;
 import rx.Subscriber;
 import rx.subjects.ReplaySubject;
@@ -30,8 +33,11 @@ public class Servlet {
     static final Logger L = Logger.getLogger("server");
 
     public static void main(String[] args) throws Exception {
+        // assert that PrintWriter.print(String) uses UTF-8, much less verbose than Writer.write(byte[])
+        if (defaultCharset() != UTF_8) throw new Exception("default charset must be UTF-8 (-Dfile.encoding=UTF-8)");
+
         ServletHandler handler = new ServletHandler();
-        handler.addServletWithMapping(HelloServlet.class, "/*");
+        handler.addServletWithMapping(new ServletHolder(new HelloServlet()), "/*");
 
         Server server = new Server(8000);
         server.setHandler(handler);
@@ -74,24 +80,21 @@ public class Servlet {
 
                     // Out
                     try {
-                        response.addHeader("content-type", "text/event-stream;charset=utf-8");
+                        response.setCharacterEncoding("utf-8");
+                        response.setContentType("text/event-stream");
                         response.setStatus(SC_OK);
+                        // By adding this header, and not closing the connection, we disable HTTP chunking,
+                        // and we can use write()+flush() to send data in the text/event-stream protocol
+                        response.addHeader("Connection", "close");
+                        response.flushBuffer();
 
                         AsyncContext async = request.startAsync();
                         async.setTimeout(TimeUnit.HOURS.toMillis(1));
                         async.addListener(new AsyncListener() {
-                            @Override public void onComplete(AsyncEvent event) throws IOException {
-                                L.info("on complete " + event);
-                            }
-                            @Override public void onTimeout(AsyncEvent event) throws IOException {
-                                L.info("on timeout " + event);
-                            }
-                            @Override public void onError(AsyncEvent event) throws IOException {
-                                L.info("on error " + event);
-                            }
-                            @Override public void onStartAsync(AsyncEvent event) throws IOException {
-                                L.info("on start " + event);
-                            }
+                            @Override public void onStartAsync(AsyncEvent event) { L.info("on start " + event); }
+                            @Override public void onComplete(AsyncEvent event) { L.info("on complete " + event); }
+                            @Override public void onTimeout(AsyncEvent event) { L.info("on timeout " + event); }
+                            @Override public void onError(AsyncEvent event) { L.info("on error " + event); }
                         });
                         PrintWriter out = response.getWriter();
 
@@ -105,11 +108,9 @@ public class Servlet {
                                     public void onError(Throwable e) { async.complete(); }
                                     public void onNext(Pair n) {
                                         L.info("sending '" + n.msg + "'(" + n.seq + ") to " + client);
-                                        if (n.seq > 0) out.println("id: " + n.seq);
-                                        for (String row : n.msg.split("\n")) {
-                                            out.println("data: " + row);
-                                        }
-                                        out.println();
+                                        if (n.seq > 0) out.print("id: " + n.seq + "\n");
+                                        for (String row : n.msg.split("\n")) out.print("data: " + row + "\n");
+                                        out.print("\n");
                                         out.flush();
                                     }
                                 });
