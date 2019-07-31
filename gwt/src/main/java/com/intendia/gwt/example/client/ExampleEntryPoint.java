@@ -1,21 +1,21 @@
 package com.intendia.gwt.example.client;
 
-import static com.intendia.rxgwt.elemental2.RxElemental2.submit;
 import static elemental2.dom.DomGlobal.document;
 
 import com.google.gwt.core.client.EntryPoint;
-import com.intendia.rxgwt.elemental2.RxElemental2;
+import com.intendia.rxgwt2.elemento.RxElemento;
 import elemental2.dom.Element;
 import elemental2.dom.HTMLFormElement;
 import elemental2.dom.HTMLInputElement;
+import io.reactivex.Single;
 import jsinterop.base.Js;
-import rx.Observable;
+import org.jboss.gwt.elemento.core.EventType;
 
 public class ExampleEntryPoint implements EntryPoint {
 
     public void onModuleLoad() {
-        Broadcaster broadcaster = new Broadcaster_RestServiceModel(() -> new XhrResourceBuilder()
-                .path("http://localhost:8000/"));
+        Broadcaster broadcaster = new Broadcaster_RestServiceModel(
+                () -> new XhrResourceBuilder("http://localhost:8000/"));
 
         Element history = document.createElement("pre"); document.body.appendChild(history);
 
@@ -30,18 +30,15 @@ public class ExampleEntryPoint implements EntryPoint {
                 .doOnNext(msg -> history.textContent += msg + "\n")
                 .subscribe();
 
-        RxElemental2.fromEvent(form, submit)
-                .switchMap(e -> {
+        RxElemento.fromEvent(form, EventType.submit)
+                .switchMapSingle(e -> {
                     e.preventDefault();
                     console.textContent = "Sending…";
                     return broadcaster.sent(sent.value)
-                            .doOnCompleted(() -> {
+                            .onErrorResumeNext(err -> Single.just("error: " + err))
+                            .doOnSuccess(n -> {
                                 sent.value = "";
-                                console.textContent = "Success!";
-                            })
-                            .onErrorResumeNext(err -> {
-                                console.textContent = "Error: " + err;
-                                return Observable.empty();
+                                console.textContent = n;
                             });
                 })
                 .subscribe();

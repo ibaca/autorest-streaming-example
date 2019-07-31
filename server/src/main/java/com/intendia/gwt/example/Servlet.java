@@ -5,6 +5,10 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.logging.Level.SEVERE;
 import static javax.servlet.http.HttpServletResponse.SC_OK;
 
+import io.reactivex.Observable;
+import io.reactivex.Observer;
+import io.reactivex.disposables.Disposable;
+import io.reactivex.subjects.ReplaySubject;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -25,9 +29,6 @@ import javax.servlet.http.HttpServletResponse;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.servlet.ServletHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
-import rx.Observable;
-import rx.Subscriber;
-import rx.subjects.ReplaySubject;
 
 public class Servlet {
     static final Logger L = Logger.getLogger("server");
@@ -49,9 +50,16 @@ public class Servlet {
     public static class HelloServlet extends GenericServlet {
         ReplaySubject<String> broadcasterIn = ReplaySubject.create(1024);
         Observable<Pair> broadcasterOut = broadcasterIn.map(Pair::next);
+        private @Nullable Disposable subscription;
 
-        public HelloServlet() {
-            broadcasterOut.subscribe(n -> L.info("broadcast " + n));
+        @Override public void init() throws ServletException {
+            super.init();
+            subscription = broadcasterOut.subscribe(n -> L.info("broadcast " + n));
+        }
+
+        @Override public void destroy() {
+            super.destroy();
+            if (subscription != null) {subscription.dispose(); subscription = null;}
         }
 
         @Override public void service(ServletRequest req, ServletResponse res) throws ServletException, IOException {
@@ -103,8 +111,9 @@ public class Servlet {
                         int first = Integer.parseInt(firstOpt == null ? "0" : firstOpt);
                         broadcasterOut.filter(n -> n.seq > first)
                                 .startWith(new Pair(0, "\"subscription success\""))
-                                .subscribe(new Subscriber<Pair>() {
-                                    public void onCompleted() { async.complete(); }
+                                .subscribe(new Observer<Pair>() {
+                                    public void onSubscribe(Disposable d) {}
+                                    public void onComplete() { async.complete(); }
                                     public void onError(Throwable e) { async.complete(); }
                                     public void onNext(Pair n) {
                                         L.info("sending '" + n.msg + "'(" + n.seq + ") to " + client);

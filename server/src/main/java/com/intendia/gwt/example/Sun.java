@@ -6,6 +6,10 @@ import static java.util.logging.Level.SEVERE;
 import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import io.reactivex.Observable;
+import io.reactivex.Observer;
+import io.reactivex.disposables.Disposable;
+import io.reactivex.subjects.ReplaySubject;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -18,9 +22,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
-import rx.Observable;
-import rx.Subscriber;
-import rx.subjects.ReplaySubject;
 
 public class Sun {
     static final Logger L = Logger.getLogger("server");
@@ -55,13 +56,10 @@ public class Sun {
                 int first = Integer.parseInt(firstOpt == null ? "0" : firstOpt);
                 broadcasterOut.filter(n -> n.seq > first)
                         .startWith(new Pair(0, "\"subscription success\""))
-                        .subscribe(new Subscriber<Pair>() {
-                            public void onCompleted() {
-                                try { out.close(); } catch (IOException ignore) { }
-                            }
-                            public void onError(Throwable e) {
-                                try { out.close(); } catch (IOException ignore) { }
-                            }
+                        .subscribe(new Observer<Pair>() {
+                            public void onSubscribe(Disposable d) {}
+                            public void onComplete() { try { out.close(); } catch (IOException ignore) { } }
+                            public void onError(Throwable e) { try { out.close(); } catch (IOException ignore) { } }
                             public void onNext(Pair n) {
                                 try {
                                     L.info("sending data to " + exchange.getRemoteAddress());
